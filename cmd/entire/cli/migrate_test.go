@@ -80,7 +80,7 @@ func TestMigrateCheckpointsV2_Basic(t *testing.T) {
 
 	var stdout bytes.Buffer
 
-	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.migrated)
 	assert.Equal(t, 0, result.skipped)
@@ -107,14 +107,14 @@ func TestMigrateCheckpointsV2_Idempotent(t *testing.T) {
 	var stdout bytes.Buffer
 
 	// First run: should migrate
-	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result1.migrated)
 	assert.Equal(t, 0, result1.skipped)
 
 	// Second run: should skip (no agent type means backfill also can't produce compact transcript)
 	stdout.Reset()
-	result2, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result2, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 0, result2.migrated)
 	assert.Equal(t, 1, result2.skipped)
@@ -141,7 +141,7 @@ func TestMigrateCheckpointsV2_MultiSession(t *testing.T) {
 
 	var stdout bytes.Buffer
 
-	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.migrated)
 
@@ -159,7 +159,7 @@ func TestMigrateCheckpointsV2_NoV1Branch(t *testing.T) {
 	var stdout bytes.Buffer
 
 	// No v1 data written — ListCommitted returns empty
-	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.migrated)
 	assert.Contains(t, stdout.String(), "Nothing to migrate")
@@ -195,7 +195,7 @@ func TestMigrateCheckpointsV2_CompactionSkipped(t *testing.T) {
 
 	var stdout bytes.Buffer
 
-	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, migrateErr)
 	assert.Equal(t, 1, result.migrated)
 	assert.Contains(t, stdout.String(), "compact transcript not generated")
@@ -222,7 +222,7 @@ func TestMigrateCheckpointsV2_TaskCheckpoint(t *testing.T) {
 
 	var stdout bytes.Buffer
 
-	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, migrateErr)
 	assert.Equal(t, 1, result.migrated)
 
@@ -259,13 +259,13 @@ func TestMigrateCheckpointsV2_AllSkippedOnRerun(t *testing.T) {
 
 	// First run: migrates both
 	var discard bytes.Buffer
-	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &discard)
+	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &discard)
 	require.NoError(t, err)
 	assert.Equal(t, 2, result1.migrated)
 
 	// Second run: skips both
 	var stdout bytes.Buffer
-	result2, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result2, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, 0, result2.migrated)
 	assert.Equal(t, 2, result2.skipped)
@@ -313,7 +313,7 @@ func TestMigrateCheckpointsV2_BackfillCompactTranscript(t *testing.T) {
 
 	// Run migration — should backfill the compact transcript
 	var stdout bytes.Buffer
-	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &stdout)
+	result, migrateErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &stdout)
 	require.NoError(t, migrateErr)
 	assert.Equal(t, 1, result.migrated, "backfill should count as migrated")
 	assert.Equal(t, 0, result.skipped)
@@ -339,7 +339,7 @@ func TestMigrateCheckpointsV2_RepairsMissingFullTranscriptBeforeBackfill(t *test
 
 	// Initial migration to create v2 state.
 	var initialRun bytes.Buffer
-	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &initialRun)
+	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &initialRun)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result1.migrated)
 
@@ -348,7 +348,7 @@ func TestMigrateCheckpointsV2_RepairsMissingFullTranscriptBeforeBackfill(t *test
 
 	// Re-run migration: should repair /full/current and count as migrated (not skipped).
 	var rerun bytes.Buffer
-	result2, rerunErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &rerun)
+	result2, rerunErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &rerun)
 	require.NoError(t, rerunErr)
 	assert.Equal(t, 1, result2.migrated)
 	assert.Equal(t, 0, result2.failed)
@@ -372,7 +372,7 @@ func TestMigrateCheckpointsV2_RepairsCurrentFullEvenWhenArchiveExists(t *testing
 
 	// Initial migration to seed v2.
 	var initialRun bytes.Buffer
-	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &initialRun)
+	result1, err := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &initialRun)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result1.migrated)
 
@@ -392,7 +392,7 @@ func TestMigrateCheckpointsV2_RepairsCurrentFullEvenWhenArchiveExists(t *testing
 
 	// Re-run migration: should still repair /full/current.
 	var rerun bytes.Buffer
-	result2, rerunErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, &rerun)
+	result2, rerunErr := migrateCheckpointsV2(context.Background(), repo, v1Store, v2Store, nil, &rerun)
 	require.NoError(t, rerunErr)
 	assert.Equal(t, 1, result2.migrated)
 	assert.Contains(t, rerun.String(), "repaired partial v2 checkpoint state")

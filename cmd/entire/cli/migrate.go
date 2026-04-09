@@ -13,6 +13,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
@@ -77,9 +78,13 @@ func runMigrateCheckpointsV2(ctx context.Context, cmd *cobra.Command) error {
 
 	v1Store := checkpoint.NewGitStore(repo)
 	v2Store := checkpoint.NewV2GitStore(repo, migrateRemoteName)
+	var gmetaStore *checkpoint.GmetaStore
+	if settings.IsGmetaEnabled(ctx) {
+		gmetaStore = checkpoint.NewGmetaStore(repo)
+	}
 	out := cmd.OutOrStdout()
 
-	result, err := migrateCheckpointsV2(ctx, repo, v1Store, v2Store, out)
+	result, err := migrateCheckpointsV2(ctx, repo, v1Store, v2Store, gmetaStore, out)
 	if err != nil {
 		return err
 	}
@@ -102,7 +107,7 @@ var (
 
 const migrateRemoteName = "origin"
 
-func migrateCheckpointsV2(ctx context.Context, repo *git.Repository, v1Store *checkpoint.GitStore, v2Store *checkpoint.V2GitStore, out io.Writer) (*migrateResult, error) {
+func migrateCheckpointsV2(ctx context.Context, repo *git.Repository, v1Store *checkpoint.GitStore, v2Store *checkpoint.V2GitStore, gmetaStore *checkpoint.GmetaStore, out io.Writer) (*migrateResult, error) {
 	v1List, err := v1Store.ListCommitted(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list v1 checkpoints: %w", err)
@@ -120,7 +125,7 @@ func migrateCheckpointsV2(ctx context.Context, repo *git.Repository, v1Store *ch
 	for i, info := range v1List {
 		prefix := fmt.Sprintf("  [%d/%d] Migrating checkpoint %s...", i+1, total, info.CheckpointID)
 
-		if migrateErr := migrateOneCheckpoint(ctx, repo, v1Store, v2Store, info, out, prefix); migrateErr != nil {
+		if migrateErr := migrateOneCheckpoint(ctx, repo, v1Store, v2Store, gmetaStore, info, out, prefix); migrateErr != nil {
 			switch {
 			case errors.Is(migrateErr, errAlreadyMigrated):
 				fmt.Fprintf(out, "%s skipped (already in v2)\n", prefix)
@@ -145,7 +150,7 @@ func migrateCheckpointsV2(ctx context.Context, repo *git.Repository, v1Store *ch
 	return result, nil
 }
 
-func migrateOneCheckpoint(ctx context.Context, repo *git.Repository, v1Store *checkpoint.GitStore, v2Store *checkpoint.V2GitStore, info checkpoint.CommittedInfo, out io.Writer, prefix string) error {
+func migrateOneCheckpoint(ctx context.Context, repo *git.Repository, v1Store *checkpoint.GitStore, v2Store *checkpoint.V2GitStore, gmetaStore *checkpoint.GmetaStore, info checkpoint.CommittedInfo, out io.Writer, prefix string) error {
 	existing, err := v2Store.ReadCommitted(ctx, info.CheckpointID)
 	if err != nil {
 		return fmt.Errorf("failed to check v2 for checkpoint %s: %w", info.CheckpointID, err)
@@ -209,6 +214,17 @@ func migrateOneCheckpoint(ctx context.Context, repo *git.Repository, v1Store *ch
 
 		if writeErr := v2Store.WriteCommitted(ctx, opts); writeErr != nil {
 			return fmt.Errorf("failed to write v2 session %d: %w", sessionIdx, writeErr)
+		}
+
+		// Gmeta dual-write (session data only, no task metadata — see plan)
+		if gmetaStore != nil && !content.Metadata.IsTask {
+			if gmetaErr := gmetaStore.WriteCommitted(ctx, opts); gmetaErr != nil {
+				logging.Warn(ctx, "gmeta migrate write failed",
+					slog.String("checkpoint_id", string(info.CheckpointID)),
+					slog.Int("session_index", sessionIdx),
+					slog.String("error", gmetaErr.Error()),
+				)
+			}
 		}
 	}
 

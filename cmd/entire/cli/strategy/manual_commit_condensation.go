@@ -257,6 +257,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	}
 
 	writeCommittedV2IfEnabled(ctx, repo, writeOpts)
+	writeCommittedGmetaIfEnabled(ctx, repo, writeOpts)
 
 	return &CondenseResult{
 		CheckpointID:         checkpointID,
@@ -1132,6 +1133,23 @@ func writeCommittedV2IfEnabled(ctx context.Context, repo *git.Repository, opts c
 	v2Store := cpkg.NewV2GitStore(repo, ResolveCheckpointURL(ctx, "origin"))
 	if err := v2Store.WriteCommitted(ctx, opts); err != nil {
 		logging.Warn(ctx, "v2 dual-write failed",
+			slog.String("checkpoint_id", opts.CheckpointID.String()),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// writeCommittedGmetaIfEnabled writes checkpoint data in gmeta exchange format
+// when gmeta is enabled in settings. Failures are logged as warnings — gmeta
+// writes are best-effort and must not block the v1/v2 paths.
+func writeCommittedGmetaIfEnabled(ctx context.Context, repo *git.Repository, opts cpkg.WriteCommittedOptions) {
+	if !settings.IsGmetaEnabled(ctx) {
+		return
+	}
+
+	gmetaStore := cpkg.NewGmetaStore(repo)
+	if err := gmetaStore.WriteCommitted(ctx, opts); err != nil {
+		logging.Warn(ctx, "gmeta write failed",
 			slog.String("checkpoint_id", opts.CheckpointID.String()),
 			slog.String("error", err.Error()),
 		)

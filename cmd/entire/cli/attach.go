@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/session"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
@@ -139,7 +141,7 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 
 	tokenUsage := agent.CalculateTokenUsage(logCtx, ag, transcriptData, 0, "")
 
-	if err := store.WriteCommitted(ctx, cpkg.WriteCommittedOptions{
+	writeOpts := cpkg.WriteCommittedOptions{
 		CheckpointID: checkpointID,
 		SessionID:    sessionID,
 		Strategy:     strategy.StrategyNameManualCommit,
@@ -150,8 +152,20 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 		Agent:        ag.Type(),
 		Model:        meta.Model,
 		TokenUsage:   tokenUsage,
-	}); err != nil {
+	}
+	if err := store.WriteCommitted(ctx, writeOpts); err != nil {
 		return fmt.Errorf("failed to write checkpoint: %w", err)
+	}
+
+	// Gmeta dual-write (best-effort)
+	if settings.IsGmetaEnabled(logCtx) {
+		gmetaStore := cpkg.NewGmetaStore(repo)
+		if err := gmetaStore.WriteCommitted(ctx, writeOpts); err != nil {
+			logging.Warn(logCtx, "gmeta write failed",
+				slog.String("checkpoint_id", checkpointID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	// Create or update session state.
