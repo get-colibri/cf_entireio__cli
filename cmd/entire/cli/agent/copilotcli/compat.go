@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -69,7 +70,7 @@ func parseHookEnvelope(data []byte) (*hookEnvelope, error) {
 
 	env := &hookEnvelope{
 		Host:           detectHookHost(raw),
-		SessionID:      firstString(raw, "sessionId"),
+		SessionID:      firstString(raw, "sessionId", "session_id"),
 		Prompt:         firstString(raw, "prompt"),
 		TranscriptPath: firstString(raw, "transcriptPath", "transcript_path"),
 		HookEventName:  firstString(raw, "hookEventName"),
@@ -93,10 +94,10 @@ func parseHookEnvelope(data []byte) (*hookEnvelope, error) {
 }
 
 func detectHookHost(raw map[string]json.RawMessage) HookHost {
-	if _, ok := raw["hookEventName"]; ok {
+	if isJSONString(raw["hookEventName"]) {
 		return HostVSCode
 	}
-	if _, ok := raw["transcript_path"]; ok {
+	if isJSONString(raw["transcript_path"]) {
 		return HostVSCode
 	}
 	if isJSONString(raw["timestamp"]) {
@@ -169,15 +170,40 @@ func isJSONNumber(raw json.RawMessage) bool {
 // validateVSCodeEvent checks whether the hookEventName is consistent with the
 // CLI hook subcommand that was invoked. Returns true if the event should be
 // processed, false if it should be silently skipped (mismatch or unknown event).
-func validateVSCodeEvent(hookEventName, hookName string) bool {
+func validateVSCodeEvent(env *hookEnvelope, hookName string) bool {
+	hookEventName := env.HookEventName
 	allowedHooks, known := vsCodeEventToHookNames[hookEventName]
 	if !known {
 		return false
 	}
-	for _, allowed := range allowedHooks {
-		if allowed == hookName {
-			return true
+	if !slices.Contains(allowedHooks, hookName) {
+		return false
+	}
+
+	// VS Code overloads "Stop" for both end-of-turn and terminal session-stop
+	// payloads. Route them by reason to avoid ending sessions on ordinary turns.
+	if hookEventName == VSCodeEventStop {
+		isTerminal := isTerminalVSCodeStop(env)
+		switch hookName {
+		case HookNameAgentStop:
+			return !isTerminal
+		case HookNameSessionEnd:
+			return isTerminal
 		}
 	}
-	return false
+
+	return true
+}
+
+func isTerminalVSCodeStop(env *hookEnvelope) bool {
+	if env.Reason != "" {
+		return true
+	}
+
+	switch env.StopReason {
+	case "", "end_turn":
+		return false
+	default:
+		return true
+	}
 }
