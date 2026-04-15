@@ -4,7 +4,7 @@ Entire hooks into your Git workflow to capture AI agent sessions as you work. Se
 
 With Entire, you can:
 
-- **Understand why code changed** — see the full prompt  /response transcript and files touched
+- **Understand why code changed** — see the full prompt /response transcript and files touched
 - **Recover instantly** — rewind to a known-good checkpoint when an agent goes sideways and resume seamlessly
 - **Keep Git history clean** — preserve agent context on a separate branch
 - **Onboard faster** — show the path from prompt → change → commit
